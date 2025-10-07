@@ -1,8 +1,17 @@
-#EJERCICIO: Rellenar los archivos verilog
-yosys read_verilog computer.v
+yosys -import
 
-yosys synth
-yosys write_verilog out/netlist.v
+# Lee SOLO el RTL del computador (sin testbench)
+read_verilog -sv alu.v pc.v register.v instruction_memory.v control_unit.v computer.v
 
-yosys stat
-yosys tee -q -o "out/computer.rpt" stat
+# Define top y verifica jerarquía
+hierarchy -check -top computer
+
+# Síntesis y reporte
+synth -top computer
+stat
+
+# Netlist a disco
+write_verilog -noattr out/netlist.v
+
+
+
