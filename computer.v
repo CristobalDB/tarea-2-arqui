@@ -1,11 +1,13 @@
+// computer.v — toplevel 8 bits + IR + control_unit + data_memory + saltos
+
 module computer(
   input              clk,
-  output      [7:0]  alu_out_bus
+  output      [7:0]  alu_out_bus   // expuesto para waveform
 );
   // --- Buses internos visibles en el TB ---
-  wire [7:0]  pc_out_bus;
-  wire [14:0] im_out_bus;
-  reg  [14:0] IR;
+  wire [7:0]  pc_out_bus;          // PC (8b)
+  wire [14:0] im_out_bus;          // [14:8]=opcode(7), [7:0]=literal(8)
+  reg  [14:0] IR;                  // Instruction Register
 
   // Decodificación
   wire [6:0]  opcode  = IR[14:8];
@@ -15,46 +17,86 @@ module computer(
   wire [7:0]  regA_out_bus, regB_out_bus;
 
   // Señales de control (desde control_unit)
-  wire        LA, LB;
-  wire [1:0]  SA, SB;
-  wire [3:0]  S;
+  wire        LA, LB;        // enable de carga A/B
+  wire [1:0]  SA, SB;        // selects de fuentes a la ALU
+  wire [3:0]  S;             // operación ALU
 
-  // >>> NUEVAS señales de control para Memoria de Datos <<<
-  wire        MW;          // write enable a data_memory
-  wire        MA;          // 0 = address = literal ; 1 = address = B
-  wire [1:0]  WSEL;        // qué dato escribimos en memoria:
-                           // 00=ALU, 01=A, 10=B, 11=ZERO
+  // Señales de control de memoria de datos (desde control_unit)
+  wire        MW;            // write enable data memory
+  wire        MA;            // 0: addr=literal, 1: addr=B
+  wire [1:0]  WSEL;          // 00=ALU, 01=A, 10=B, 11=ZERO
 
-  // ALU sources
+  // Señal de salto (desde control_unit)
+  wire        LP;            // load PC
+
+  // Fuentes hacia la ALU
   wire [7:0]  srcA, srcB;
 
-  // Flags
+  // Flags ALU
   wire Z, N, C, V;
+
+  // --------- Data memory wires ---------
+  wire [7:0] mem_out_bus;
+  wire [7:0] mem_addr;
+  wire [7:0] mem_din;
+
+  // Valor a cargar al PC en saltos (usamos el literal)
+  wire [7:0] pc_load_val = literal;
 
   // ----------------- Instancias -----------------
 
-  // PC
-  pc #(.N(8)) PC (.clk(clk), .pc(pc_out_bus));
+  // PC de 8 bits con salto (load/din)
+  pc #(.N(8)) PC (
+    .clk (clk),
+    .load(LP),
+    .din (pc_load_val),
+    .pc  (pc_out_bus)
+  );
 
-  // Instruction Memory
+  // Memoria de instrucciones 15b (opcode+literal)
   instruction_memory #(.AW(8), .DW(15)) IM (
     .address(pc_out_bus),
     .out(im_out_bus)
   );
 
-  // IR
-  always @(posedge clk) IR <= im_out_bus;
+  // IR: latch simple (fetch cada ciclo)
+  always @(posedge clk) begin
+    IR <= im_out_bus;
+  end
 
-  // >>> Data Memory <<<
-  wire [7:0] mem_out_bus;
-  wire [7:0] mem_addr = (MA) ? regB_out_bus : literal;
+  // Unidad de control: decodifica opcode -> señales de control (incluye memoria y saltos)
+  control_unit CTRL (
+    .opcode(opcode),
+    // flags desde ALU
+    .Z(Z), .N(N), .C(C), .V(V),
+    // registros y ALU
+    .LA(LA), .LB(LB),
+    .SA(SA), .SB(SB),
+    .S(S),
+    // memoria de datos
+    .MW(MW), .MA(MA), .WSEL(WSEL),
+    // saltos
+    .LP(LP)
+  );
+
+  // Registros A y B (8b) con enable
+  register #(.N(8)) regA (
+    .clk(clk), .data(alu_out_bus), .load(LA), .out(regA_out_bus)
+  );
+
+  register #(.N(8)) regB (
+    .clk(clk), .data(alu_out_bus), .load(LB), .out(regB_out_bus)
+  );
+
+  // ----------------- Data Memory -----------------
+  // Dirección: literal o B según MA
+  assign mem_addr = (MA) ? regB_out_bus : literal;
 
   // Dato a escribir en Mem según WSEL
-  wire [7:0] mem_din =
-      (WSEL==2'b00) ? alu_out_bus :
-      (WSEL==2'b01) ? regA_out_bus :
-      (WSEL==2'b10) ? regB_out_bus :
-                      8'h00; // 2'b11 => ZERO
+  assign mem_din  = (WSEL==2'b00) ? alu_out_bus   // ALU
+                   : (WSEL==2'b01) ? regA_out_bus // A
+                   : (WSEL==2'b10) ? regB_out_bus // B
+                   : 8'h00;                       // ZERO
 
   data_memory #(.AW(8)) DM (
     .clk (clk),
@@ -63,19 +105,6 @@ module computer(
     .we  (MW),
     .dout(mem_out_bus)
   );
-
-  // Control Unit (ahora con señales de memoria)
-  control_unit CTRL (
-    .opcode(opcode),
-    .LA(LA), .LB(LB),
-    .SA(SA), .SB(SB),
-    .S(S),
-    .MW(MW), .MA(MA), .WSEL(WSEL)
-  );
-
-  // Registros A/B
-  register #(.N(8)) regA (.clk(clk), .data(alu_out_bus), .load(LA), .out(regA_out_bus));
-  register #(.N(8)) regB (.clk(clk), .data(alu_out_bus), .load(LB), .out(regB_out_bus));
 
   // Selección de fuentes para la ALU
   // SA: 00->0x00, 01->A, 10->B, 11->0x01
@@ -88,8 +117,15 @@ module computer(
   assign srcB = (SB==2'b00) ? regB_out_bus :
                 (SB==2'b01) ? literal :
                 (SB==2'b10) ? regA_out_bus :
-                              mem_out_bus; // <<< ahora SB==11 es Mem[...]
+                              mem_out_bus; // Mem cuando SB==11
 
-  // ALU
-  alu ALU (.a(srcA), .b(srcB), .s(S), .out(alu_out_bus), .z(Z), .n(N), .c(C), .v(V));
+  // ALU 8 bits
+  alu ALU (
+    .a   (srcA),
+    .b   (srcB),
+    .s   (S),
+    .out (alu_out_bus),
+    .z   (Z), .n(N), .c(C), .v(V)
+  );
+
 endmodule

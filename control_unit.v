@@ -1,48 +1,56 @@
-// control_unit.v — básicas + direccionamiento (Dir)/(B)
+// control_unit.v — básicas + memoria (Dir)/(B) + CMP + Jumps
 module control_unit(
   input  [6:0] opcode,
-  output reg       LA, LB,
-  output reg [1:0] SA, SB,
-  output reg [3:0] S,
+  input        Z, N, C, V,        // flags desde la ALU
+  output reg       LA, LB,        // load de A/B
+  output reg [1:0] SA, SB,        // selects hacia ALU (a/b)
+  output reg [3:0] S,             // operación ALU
   // control RAM de datos
-  output reg       MW,       // write enable memoria
-  output reg       MA,       // 0: addr=literal ; 1: addr=B
-  output reg [1:0] WSEL      // 00=ALU, 01=A, 10=B, 11=ZERO
+  output reg       MW,            // write enable memoria
+  output reg       MA,            // 0: addr = literal ; 1: addr = B
+  output reg [1:0] WSEL,          // 00=ALU, 01=A, 10=B, 11=ZERO
+  // saltos
+  output reg       LP             // load PC (PC := literal) cuando 1
 );
   // SA: 00->0x00(Z), 01->A, 10->B, 11->0x01
   localparam SA_Z=2'b00, SA_A=2'b01, SA_B=2'b10, SA_U=2'b11;
   // SB: 00->B, 01->Lit, 10->A, 11->Mem
   localparam SB_B=2'b00, SB_L=2'b01, SB_A=2'b10, SB_M=2'b11;
-  // ALU ops
+
+  // ALU ops (debe calzar con alu.v)
   localparam ADD=4'd0, SUB=4'd1, AND_=4'd2, OR_=4'd3, NOT_=4'd4,
              XOR_=4'd5, SHL=4'd6, SHR=4'd7, INC=4'd8;
+
   // WSEL: dato a escribir en Mem
   localparam W_ALU=2'b00, W_A=2'b01, W_B=2'b10, W_Z=2'b11;
 
   always @* begin
-    // defaults (NOP)
-    LA=0; LB=0; SA=SA_Z; SB=SB_B; S=ADD; MW=0; MA=0; WSEL=W_ALU;
+    // Defaults (NOP)
+    LA=0; LB=0;
+    SA=SA_Z; SB=SB_B; S=ADD;
+    MW=0; MA=0; WSEL=W_ALU;
+    LP=0;
 
     case (opcode)
 
       // ======== INSTRUCCIONES BÁSICAS ========
       // MOV
-      7'b0000000: begin LA=1; SA=SA_Z; SB=SB_B; S=ADD; end // MOV A,B  -> A=B (0+B)
-      7'b0000001: begin LB=1; SA=SA_Z; SB=SB_A; S=ADD; end // MOV B,A  -> B=A (0+A)
+      7'b0000000: begin LA=1; SA=SA_Z; SB=SB_B; S=ADD; end // MOV A,B  -> A=0+B
+      7'b0000001: begin LB=1; SA=SA_Z; SB=SB_A; S=ADD; end // MOV B,A  -> B=0+A
       7'b0000010: begin LA=1; SA=SA_Z; SB=SB_L; S=ADD; end // MOV A, Lit
       7'b0000011: begin LB=1; SA=SA_Z; SB=SB_L; S=ADD; end // MOV B, Lit
 
       // ADD
       7'b0000100: begin LA=1; SA=SA_A; SB=SB_B; S=ADD; end // ADD A,B
       7'b0000101: begin LB=1; SA=SA_B; SB=SB_A; S=ADD; end // ADD B,A
-      7'b0000110: begin LA=1; SA=SA_A; SB=SB_L; S=ADD; end // ADD A, Lit
-      7'b0000111: begin LB=1; SA=SA_B; SB=SB_L; S=ADD; end // ADD B, Lit
+      7'b0000110: begin LA=1; SA=SA_A; SB=SB_L; S=ADD; end // ADD A,Lit
+      7'b0000111: begin LB=1; SA=SA_B; SB=SB_L; S=ADD; end // ADD B,Lit
 
-      // SUB (nota: tu test espera SUB B,A => B := A - B)
+      // SUB (tu test usa SUB B,A => B = A - B)
       7'b0001000: begin LA=1; SA=SA_A; SB=SB_B; S=SUB; end // SUB A,B
       7'b0001001: begin LB=1; SA=SA_A; SB=SB_B; S=SUB; end // SUB B,A  (B=A-B)
-      7'b0001010: begin LA=1; SA=SA_A; SB=SB_L; S=SUB; end // SUB A, Lit
-      7'b0001011: begin LB=1; SA=SA_B; SB=SB_L; S=SUB; end // SUB B, Lit
+      7'b0001010: begin LA=1; SA=SA_A; SB=SB_L; S=SUB; end // SUB A,Lit
+      7'b0001011: begin LB=1; SA=SA_B; SB=SB_L; S=SUB; end // SUB B,Lit
 
       // AND
       7'b0001100: begin LA=1; SA=SA_A; SB=SB_B; S=AND_; end
@@ -142,6 +150,25 @@ module control_unit(
       7'b1001010: begin MW=1; MA=1; SA=SA_U; SB=SB_M; S=ADD; WSEL=W_ALU; end // INC (B)
       7'b1001011: begin MW=1; MA=0; WSEL=W_Z; end // RST (Dir)
       7'b1001100: begin MW=1; MA=1; WSEL=W_Z; end // RST (B)
+
+      // ======== CMP (setean flags con SUB; no escriben A/B/Mem) ========
+      7'b1001101: begin /* CMP A,B    */ SA=SA_A; SB=SB_B; S=SUB; end
+      7'b1001110: begin /* CMP A,Lit  */ SA=SA_A; SB=SB_L; S=SUB; end
+      7'b1001111: begin /* CMP B,Lit  */ SA=SA_B; SB=SB_L; S=SUB; end
+      7'b1010000: begin /* CMP A,(Dir)*/ MA=0; SA=SA_A; SB=SB_M; S=SUB; end
+      7'b1010001: begin /* CMP B,(Dir)*/ MA=0; SA=SA_B; SB=SB_M; S=SUB; end
+      7'b1010010: begin /* CMP A,(B)  */ MA=1; SA=SA_A; SB=SB_M; S=SUB; end
+
+      // ======== JUMPS (PC := literal si se cumple la condición) ========
+      7'b1010011: begin                    LP = 1'b1; end            // JMP
+      7'b1010100: begin if ( Z     )       LP = 1'b1; end            // JEQ
+      7'b1010101: begin if (!Z     )       LP = 1'b1; end            // JNE
+      7'b1010110: begin if (!N && !Z)      LP = 1'b1; end            // JGT
+      7'b1010111: begin if ( N     )       LP = 1'b1; end            // JLT
+      7'b1011000: begin if (!N     )       LP = 1'b1; end            // JGE
+      7'b1011001: begin if ( N || Z)       LP = 1'b1; end            // JLE
+      7'b1011010: begin if ( C     )       LP = 1'b1; end            // JCR
+      7'b1011011: begin if ( V     )       LP = 1'b1; end            // JOV
 
       default: ; // NOP
     endcase
