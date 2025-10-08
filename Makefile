@@ -1,5 +1,5 @@
 # Archivos del proyecto
-VERILOG_FILES = computer.v alu.v instruction_memory.v data_memory.v mux2.v pc.v register.v control_unit.v 
+VERILOG_FILES = computer.v alu.v instruction_memory.v data_memory.v mux2.v pc.v register.v control_unit.v status.v
 TESTBENCH_FILE = testbench_memory.v
 YOSYS_SCRIPT = yosys.tcl
 

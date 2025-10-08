@@ -26,6 +26,7 @@ module test;
     // ------------------------------------------------------------
 
     initial begin
+
         $dumpfile("out/dump.vcd");
         $dumpvars(0, test);
         $readmemb("im_memory.dat", Comp.IM.mem);

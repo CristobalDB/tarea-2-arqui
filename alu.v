@@ -33,7 +33,7 @@ module alu(
       4'd1: begin // SUB
         diff_ext = {1'b0, a} - {1'b0, b};
         out = diff_ext[7:0];
-        c   = diff_ext[8];                    // si tu spec usa C = ~borrow, cambia a ~diff_ext[8]
+        c   = ~diff_ext[8];                   // carry = ~borrow  ✅
         v   = (a[7]^b[7]) & (out[7]^a[7]);    // overflow resta
       end
       4'd2: out = a & b;                      // AND
@@ -70,5 +70,3 @@ module alu(
   assign n = out[7];
 
 endmodule
-
-

@@ -7,7 +7,9 @@ module computer(
   // --- Buses internos visibles en el TB ---
   wire [7:0]  pc_out_bus;          // PC (8b)
   wire [14:0] im_out_bus;          // [14:8]=opcode(7), [7:0]=literal(8)
-  reg  [14:0] IR;                  // Instruction Register
+
+  // Instruction Register — combinacional (sin latencia)
+  wire [14:0] IR = im_out_bus;
 
   // Decodificación
   wire [6:0]  opcode  = IR[14:8];
@@ -22,8 +24,8 @@ module computer(
   wire [3:0]  S;             // operación ALU
 
   // Señales de control de memoria de datos (desde control_unit)
-  wire        MW;            // write enable data memory
-  wire        MA;            // 0: addr=literal, 1: addr=B
+  wire        MW;            // ≡ DW: write enable data memory
+  wire        MA;            // ≡ SD0: 0: addr=literal, 1: addr=B
   wire [1:0]  WSEL;          // 00=ALU, 01=A, 10=B, 11=ZERO
 
   // Señal de salto (desde control_unit)
@@ -31,9 +33,6 @@ module computer(
 
   // Fuentes hacia la ALU
   wire [7:0]  srcA, srcB;
-
-  // Flags ALU
-  wire Z, N, C, V;
 
   // --------- Data memory wires ---------
   wire [7:0] mem_out_bus;
@@ -59,15 +58,24 @@ module computer(
     .out(im_out_bus)
   );
 
-  // IR: latch simple (fetch cada ciclo)
-  always @(posedge clk) begin
-    IR <= im_out_bus;
-  end
+  // --- Flags: ALU (combinacionales) -> STATUS (latcheados) ---
+  wire z_alu, n_alu, c_alu, v_alu;  // salida directa de la ALU
+  wire Z, N, C, V;                  // flags latcheados (reales del CPU)
+
+  // Habilitación: NO actualizar flags durante un salto puro (LP=1)
+  wire STATUS_EN = ~LP;
+
+  status STATUS (
+    .clk  (clk),
+    .en   (STATUS_EN),
+    .z_in (z_alu), .n_in(n_alu), .c_in(c_alu), .v_in(v_alu),
+    .Z(Z), .N(N), .C(C), .V(V)
+  );
 
   // Unidad de control: decodifica opcode -> señales de control (incluye memoria y saltos)
   control_unit CTRL (
     .opcode(opcode),
-    // flags desde ALU
+    // flags latcheados
     .Z(Z), .N(N), .C(C), .V(V),
     // registros y ALU
     .LA(LA), .LB(LB),
@@ -79,7 +87,7 @@ module computer(
     .LP(LP)
   );
 
-  // Registros A y B (8b) con enable
+  // Registros A y B (8b) con enable — sin gateo de primer ciclo
   register #(.N(8)) regA (
     .clk(clk), .data(alu_out_bus), .load(LA), .out(regA_out_bus)
   );
@@ -102,7 +110,7 @@ module computer(
     .clk (clk),
     .addr(mem_addr),
     .din (mem_din),
-    .we  (MW),
+    .we  (MW),              // sin gateo
     .dout(mem_out_bus)
   );
 
@@ -125,7 +133,7 @@ module computer(
     .b   (srcB),
     .s   (S),
     .out (alu_out_bus),
-    .z   (Z), .n(N), .c(C), .v(V)
+    .z   (z_alu), .n(n_alu), .c(c_alu), .v(v_alu)
   );
 
 endmodule
